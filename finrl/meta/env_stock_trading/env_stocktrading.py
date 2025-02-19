@@ -17,7 +17,15 @@ matplotlib.use("Agg")
 
 
 class StockTradingEnv(gym.Env):
-    """A stock trading environment for OpenAI gym"""
+    """
+    A stock trading environment for OpenAI gym
+    self.state:
+    1. self.state[0]: 表示当前的现金余额
+    2. self.state[1 : (self.stock_dim + 1)]: 表示每只股票的价格
+    3. self.state[(self.stock_dim + 1) : (self.stock_dim * 2 + 1)]: 表示每只股票的持股数量
+    4. self.state[(self.stock_dim * 2 + 1) : (self.stock_dim * 3 + 1)]:
+        表示每只股票的技术指标值
+    """
 
     metadata = {"render.modes": ["human"]}
 
@@ -46,42 +54,42 @@ class StockTradingEnv(gym.Env):
         iteration="",
     ):
         self.day = day
-        self.df = df
-        self.stock_dim = stock_dim
-        self.hmax = hmax
-        self.num_stock_shares = num_stock_shares
-        self.initial_amount = initial_amount  # get the initial cash
-        self.buy_cost_pct = buy_cost_pct
-        self.sell_cost_pct = sell_cost_pct
-        self.reward_scaling = reward_scaling
+        self.df = df  # 包含股票数据的 Pandas DataFrame。通常包括日期、股票代码、开盘价、收盘价、最高价、最低价、成交量等信息。
+        self.stock_dim = stock_dim  # 股票的数量（维度）。表示环境中包含多少只股票。
+        self.hmax = hmax  # 每次交易的最大持股数量。限制每次交易中可以购买或卖出的最大股票数量。
+        self.num_stock_shares = num_stock_shares  # 每只股票的初始持股数量。是一个包含每只股票初始持股数量的列表。
+        self.initial_amount = initial_amount  # 初始资金量。表示在交易开始时，账户中有多少现金。
+        self.buy_cost_pct = buy_cost_pct  # 每只股票的买入成本百分比。是一个包含每只股票买入成本百分比的列表。
+        self.sell_cost_pct = sell_cost_pct  # 每只股票的卖出成本百分比。是一个包含每只股票卖出成本百分比的列表。
+        self.reward_scaling = reward_scaling  # 奖励缩放因子。用于调整奖励的大小，以便更好地训练模型。
         self.state_space = state_space
         self.action_space = action_space
-        self.tech_indicator_list = tech_indicator_list
-        self.action_space = spaces.Box(low=-1, high=1, shape=(self.action_space,))
+        self.tech_indicator_list = tech_indicator_list  # 技术指标列表。包含要在环境中使用的技术指标的名称。
+        self.action_space = spaces.Box(low=-1, high=1, shape=(self.action_space,))  # 连续动作空间
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(self.state_space,)
         )
         self.data = self.df.loc[self.day, :]
-        self.terminal = False
-        self.make_plots = make_plots
-        self.print_verbosity = print_verbosity
-        self.turbulence_threshold = turbulence_threshold
-        self.risk_indicator_col = risk_indicator_col
-        self.initial = initial
-        self.previous_state = previous_state
-        self.model_name = model_name
-        self.mode = mode
-        self.iteration = iteration
+        self.terminal = False  # 是否到截止日期
+        self.make_plots = make_plots  # 是否生成交易结果的图表。默认为 False。
+        self.print_verbosity = print_verbosity  # 打印详细信息的频率。表示每隔多少个回合打印一次交易信息。
+        self.turbulence_threshold = turbulence_threshold  # 湍流阈值。用于控制交易策略的风险。
+        self.risk_indicator_col = risk_indicator_col  # 风险指标列。表示用于计算湍流阈值的风险指标的列名。
+        self.initial = initial  # 是否使用初始状态。表示是否使用初始状态来初始化环境。
+        self.previous_state = previous_state  # 先前状态。表示在训练过程中，上一个状态的信息。
+        self.model_name = model_name  # 模型名称。表示用于训练的模型的名称。
+        self.mode = mode  # 模式。表示训练模型的模式。
+        self.iteration = iteration  # 迭代次数。表示训练模型的迭代次数。
         # initalize state
         self.state = self._initiate_state()
 
         # initialize reward
-        self.reward = 0
-        self.turbulence = 0
-        self.cost = 0
-        self.trades = 0
-        self.episode = 0
-        # memorize all the total balance change
+        self.reward = 0  # 初始化奖励为 0
+        self.turbulence = 0  # 初始化湍流为 0
+        self.cost = 0  # 初始化成本为 0
+        self.trades = 0  # 初始化交易次数为 0
+        self.episode = 0  # 初始化回合数为 0
+        # 记住所有总余额变化
         self.asset_memory = [
             self.initial_amount
             + np.sum(
@@ -102,21 +110,21 @@ class StockTradingEnv(gym.Env):
     def _sell_stock(self, index, action):
         def _do_sell_normal():
             if (
-                self.state[index + 2 * self.stock_dim + 1] != True
+                self.state[index + 2 * self.stock_dim + 1] != True  # 是否能够卖出
             ):  # check if the stock is able to sell, for simlicity we just add it in techical index
                 # if self.state[index + 1] > 0: # if we use price<0 to denote a stock is unable to trade in that day, the total asset calculation may be wrong for the price is unreasonable
                 # Sell only if the price is > 0 (no missing data in this particular date)
                 # perform sell action based on the sign of the action
-                if self.state[index + self.stock_dim + 1] > 0:
+                if self.state[index + self.stock_dim + 1] > 0:  # 持有股票数大于0
                     # Sell only if current asset is > 0
                     sell_num_shares = min(
                         abs(action), self.state[index + self.stock_dim + 1]
-                    )
+                    )  # min(卖出数量, 持有数量)
                     sell_amount = (
                         self.state[index + 1]
                         * sell_num_shares
                         * (1 - self.sell_cost_pct[index])
-                    )
+                    )  # 卖出股票的总金额，考虑了卖出成本。
                     # update balance
                     self.state[0] += sell_amount
 
@@ -229,15 +237,15 @@ class StockTradingEnv(gym.Env):
             )
             df_total_value = pd.DataFrame(self.asset_memory)
             tot_reward = (
-                self.state[0]
+                self.state[0]  # 现金
                 + sum(
                     np.array(self.state[1 : (self.stock_dim + 1)])
                     * np.array(
                         self.state[(self.stock_dim + 1) : (self.stock_dim * 2 + 1)]
                     )
-                )
-                - self.asset_memory[0]
-            )  # initial_amount is only cash part of our initial asset
+                )  # 每支股票价格 * 持有数量
+                - self.asset_memory[0]  # 初始总资产
+            )   # 交易结束后的总资产 initial_amount is only cash part of our initial asset
             df_total_value.columns = ["account_value"]
             df_total_value["date"] = self.date_memory
             df_total_value["daily_return"] = df_total_value["account_value"].pct_change(
@@ -310,10 +318,10 @@ class StockTradingEnv(gym.Env):
             begin_total_asset = self.state[0] + sum(
                 np.array(self.state[1 : (self.stock_dim + 1)])
                 * np.array(self.state[(self.stock_dim + 1) : (self.stock_dim * 2 + 1)])
-            )
+            )  # action前的总资产
             # print("begin_total_asset:{}".format(begin_total_asset))
 
-            argsort_actions = np.argsort(actions)
+            argsort_actions = np.argsort(actions)  # 返回将数组元素从小到大排序后的索引
             sell_index = argsort_actions[: np.where(actions < 0)[0].shape[0]]
             buy_index = argsort_actions[::-1][: np.where(actions > 0)[0].shape[0]]
 
@@ -334,10 +342,10 @@ class StockTradingEnv(gym.Env):
             self.day += 1
             self.data = self.df.loc[self.day, :]
             if self.turbulence_threshold is not None:
-                if len(self.df.tic.unique()) == 1:
+                if len(self.df.tic.unique()) == 1:  # 检查当前环境中是否只有一只股票
                     self.turbulence = self.data[self.risk_indicator_col]
                 elif len(self.df.tic.unique()) > 1:
-                    self.turbulence = self.data[self.risk_indicator_col].values[0]
+                    self.turbulence = self.data[self.risk_indicator_col].values[0]  # 返回湍流指标列的第一个值
             self.state = self._update_state()
 
             end_total_asset = self.state[0] + sum(
@@ -372,7 +380,7 @@ class StockTradingEnv(gym.Env):
                 + np.sum(
                     np.array(self.num_stock_shares)
                     * np.array(self.state[1 : 1 + self.stock_dim])
-                )
+                )  # 初始持股数量 * 股票价格
             ]
         else:
             previous_total_asset = self.previous_state[0] + sum(
@@ -402,19 +410,19 @@ class StockTradingEnv(gym.Env):
     def _initiate_state(self):
         if self.initial:
             # For Initial State
-            if len(self.df.tic.unique()) > 1:
+            if len(self.df.tic.unique()) > 1:  # 是否有多只股票
                 # for multiple stock
                 state = (
-                    [self.initial_amount]
-                    + self.data.close.values.tolist()
-                    + self.num_stock_shares
+                    [self.initial_amount]  # 初始现金
+                    + self.data.close.values.tolist()  # 每只股票的价格
+                    + self.num_stock_shares  # 每只股票的持股数量
                     + sum(
                         (
                             self.data[tech].values.tolist()
                             for tech in self.tech_indicator_list
                         ),
                         [],
-                    )
+                    )  # 生成一个列表，包含所有技术指标的值
                 )  # append initial stocks_share to initial state, instead of all zero
             else:
                 # for single stock
@@ -467,7 +475,7 @@ class StockTradingEnv(gym.Env):
                         for tech in self.tech_indicator_list
                     ),
                     [],
-                )
+                )  # 生成一个列表，包含所有技术指标的值
             )
 
         else:

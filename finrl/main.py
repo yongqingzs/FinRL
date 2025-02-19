@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from argparse import ArgumentParser
 from typing import List
+import sys
+sys.path.append(sys.path[0] + '/..')
 
 from finrl.config import ALPACA_API_BASE_URL
 from finrl.config import DATA_SAVE_DIR
